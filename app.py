@@ -1,349 +1,256 @@
-# -*- coding: utf-8 -*-
-"""
-EEG-based stroke auxiliary recognition tool.
-Model source: user's manuscript coefficients.
-Run locally:
-    streamlit run app.py
-"""
-
+import json
 import math
-from dataclasses import dataclass
-from typing import Dict, List
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+st.set_page_config(
+    page_title="EEG Stroke Auxiliary Recognition",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# =========================
-# 1. Fixed model parameters
-# =========================
-# Logistic regression model:
-# logit(p) = beta0 + beta_age * age + beta_sex * sex_code + beta_ptbr * P_TBR + beta_c_dtabr * C_DTABR
-# IMPORTANT: sex_code is set as 男=0, 女=1 according to the current manuscript-facing draft.
-# If the original R model used a different reference level, change SEX_CODE below.
-BETA0 = -2.094
-BETA_AGE = -0.012
-BETA_SEX = 0.332
-BETA_PTBR = 1.092
-BETA_C_DTABR = 0.897
-THRESHOLD = 0.6945
+PARAM_PATH = Path(__file__).with_name("model_parameters.json")
+with PARAM_PATH.open("r", encoding="utf-8") as f:
+    PARAMS = json.load(f)
 
-SEX_CODE = {"男": 0, "女": 1}
-
-# Reference values used only for the individual contribution plot.
-# This is a linear contribution visualization, not a formal SHAP calculation without original training data.
-REFERENCE = {
-    "年龄": 66.0,
-    "性别": 0.0,
-    "P-TBR": 1.705,
-    "C-DTABR": 1.170,
-}
-
-
-@dataclass
-class PredictionResult:
-    age: float
-    sex_label: str
-    sex_code: int
-    p_tbr: float
-    c_dtabr: float
-    logit: float
-    probability: float
-    classification: str
-    threshold: float
+B0 = float(PARAMS["intercept"])
+B = PARAMS["coefficients"]
+THRESHOLD = float(PARAMS["threshold"])
+REF = PARAMS["reference_values"]
 
 
 def sigmoid(x: float) -> float:
-    """Numerically stable logistic transformation."""
-    if x >= 0:
-        z = math.exp(-x)
-        return 1 / (1 + z)
-    z = math.exp(x)
-    return z / (1 + z)
+    return 1.0 / (1.0 + math.exp(-x))
 
 
-def predict(age: float, sex_label: str, p_tbr: float, c_dtabr: float) -> PredictionResult:
-    """Calculate stroke auxiliary recognition probability."""
-    sex_code = SEX_CODE[sex_label]
-    logit = BETA0 + BETA_AGE * age + BETA_SEX * sex_code + BETA_PTBR * p_tbr + BETA_C_DTABR * c_dtabr
-    probability = sigmoid(logit)
-    classification = "高于阈值：倾向卒中状态" if probability >= THRESHOLD else "低于阈值：暂不支持卒中状态"
-    return PredictionResult(age, sex_label, sex_code, p_tbr, c_dtabr, logit, probability, classification, THRESHOLD)
-
-
-def make_gauge(probability: float, threshold: float) -> go.Figure:
-    """Probability gauge."""
-    fig = go.Figure(
-        go.Indicator(
-            mode="gauge+number+delta",
-            value=probability * 100,
-            number={"suffix": "%", "font": {"size": 42}},
-            delta={"reference": threshold * 100, "suffix": "%", "increasing": {"color": "#B42318"}, "decreasing": {"color": "#027A48"}},
-            gauge={
-                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#667085"},
-                "bar": {"color": "#155EEF"},
-                "bgcolor": "white",
-                "borderwidth": 1,
-                "bordercolor": "#EAECF0",
-                "steps": [
-                    {"range": [0, 30], "color": "#ECFDF3"},
-                    {"range": [30, 60], "color": "#FFFAEB"},
-                    {"range": [60, 100], "color": "#FEF3F2"},
-                ],
-                "threshold": {
-                    "line": {"color": "#B42318", "width": 4},
-                    "thickness": 0.75,
-                    "value": threshold * 100,
-                },
-            },
-            title={"text": "卒中辅助识别概率", "font": {"size": 18}},
-        )
+def predict(age: float, sex_code: int, p_tbr: float, c_dtabr: float):
+    logit = (
+        B0
+        + B["age"] * age
+        + B["sex_female"] * sex_code
+        + B["P-TBR"] * p_tbr
+        + B["C-DTABR"] * c_dtabr
     )
-    fig.update_layout(height=300, margin=dict(l=30, r=30, t=50, b=20), paper_bgcolor="rgba(0,0,0,0)")
-    return fig
+    return logit, sigmoid(logit)
 
 
-def make_contribution_plot(result: PredictionResult) -> go.Figure:
-    """Linear contribution visualization relative to fixed reference values."""
+def make_force_plot(age: float, sex_code: int, p_tbr: float, c_dtabr: float):
+    # This is a coefficient-based force-plot style visualization.
+    # It is not a strict SHAP plot without the original training background data.
+    base_logit, base_prob = predict(
+        REF["age"], int(REF["sex_female"]), REF["P-TBR"], REF["C-DTABR"]
+    )
     rows = [
-        ("年龄", BETA_AGE * (result.age - REFERENCE["年龄"]), result.age, REFERENCE["年龄"]),
-        ("性别", BETA_SEX * (result.sex_code - REFERENCE["性别"]), result.sex_label, "男"),
-        ("P-TBR", BETA_PTBR * (result.p_tbr - REFERENCE["P-TBR"]), result.p_tbr, REFERENCE["P-TBR"]),
-        ("C-DTABR", BETA_C_DTABR * (result.c_dtabr - REFERENCE["C-DTABR"]), result.c_dtabr, REFERENCE["C-DTABR"]),
+        ("Age", age, B["age"] * (age - REF["age"])),
+        ("Sex", "Female" if sex_code == 1 else "Male", B["sex_female"] * (sex_code - int(REF["sex_female"]))),
+        ("P-TBR", p_tbr, B["P-TBR"] * (p_tbr - REF["P-TBR"])),
+        ("C-DTABR", c_dtabr, B["C-DTABR"] * (c_dtabr - REF["C-DTABR"])),
     ]
-    df = pd.DataFrame(rows, columns=["变量", "相对贡献", "当前值", "参考值"]).sort_values("相对贡献")
-    colors = ["#1570EF" if x < 0 else "#E31B54" for x in df["相对贡献"]]
-    text = [f"{v:+.3f}" for v in df["相对贡献"]]
+    rows = sorted(rows, key=lambda x: abs(x[2]), reverse=True)
+    current = base_logit
+    shapes = []
+    annotations = []
+    y = 0.5
+    height = 0.28
 
-    fig = go.Figure(
-        go.Bar(
-            x=df["相对贡献"],
-            y=df["变量"],
-            orientation="h",
-            marker_color=colors,
-            text=text,
-            textposition="outside",
-            hovertemplate="变量：%{y}<br>相对贡献：%{x:.3f}<extra></extra>",
+    for name, value, contribution in rows:
+        x0 = current
+        x1 = current + contribution
+        color = "#ff0f5f" if contribution >= 0 else "#1e88ff"
+        shapes.append(
+            dict(
+                type="rect",
+                xref="x",
+                yref="y",
+                x0=min(x0, x1),
+                x1=max(x0, x1),
+                y0=y - height,
+                y1=y + height,
+                fillcolor=color,
+                opacity=0.88,
+                line=dict(width=0, color=color),
+            )
         )
-    )
-    fig.add_vline(x=0, line_width=1, line_dash="dash", line_color="#667085")
+        label = f"{name} = {value}; {'+' if contribution >= 0 else ''}{contribution:.3f}"
+        annotations.append(
+            dict(
+                x=(x0 + x1) / 2,
+                y=0.12 if contribution >= 0 else 0.88,
+                text=label,
+                showarrow=False,
+                font=dict(size=13, color=color),
+                xanchor="center",
+            )
+        )
+        current = x1
+
+    final_logit = current
+    final_prob = sigmoid(final_logit)
+    x_min = min(base_logit, final_logit, *[s["x0"] for s in shapes], *[s["x1"] for s in shapes]) - 0.5
+    x_max = max(base_logit, final_logit, *[s["x0"] for s in shapes], *[s["x1"] for s in shapes]) + 0.5
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[x_min, x_max], y=[0.5, 0.5], mode="lines", line=dict(color="#4b5563", width=1)))
+    fig.add_vline(x=base_logit, line_width=1, line_dash="dot", line_color="#9ca3af")
+    fig.add_vline(x=final_logit, line_width=2, line_color="#111827")
     fig.update_layout(
-        title="个体化变量贡献图（基于Logit线性贡献）",
-        xaxis_title="相对参考值的Logit贡献：β × (X − reference)",
-        yaxis_title="",
+        title=dict(text=f"Probability of stroke status: {final_prob*100:.2f}%", x=0.5, font=dict(size=22, color="#111827")),
+        shapes=shapes,
+        annotations=annotations + [
+            dict(x=base_logit, y=0.67, text="base value", showarrow=False, font=dict(size=12, color="#6b7280")),
+            dict(x=final_logit, y=0.67, text=f"f(x)<br>{final_prob:.2f}", showarrow=False, font=dict(size=14, color="#111827")),
+            dict(x=x_max, y=0.92, text="higher", showarrow=False, font=dict(size=13, color="#ff0f5f")),
+            dict(x=x_max, y=0.82, text="lower", showarrow=False, font=dict(size=13, color="#1e88ff")),
+        ],
         height=330,
-        margin=dict(l=20, r=40, t=60, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=70, b=20),
+        xaxis=dict(title="Logit contribution", showgrid=False, zeroline=False),
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1]),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
     )
-    return fig
+    return fig, rows, base_prob, final_prob
 
 
-def make_formula_card(result: PredictionResult) -> str:
-    """HTML formula card."""
-    return f"""
-    <div class='formula-card'>
-        <div class='formula-title'>固定模型公式</div>
-        <div class='formula-body'>
-            logit(p) = -2.094 − 0.012 × 年龄 + 0.332 × 性别编码 + 1.092 × P-TBR + 0.897 × C-DTABR<br>
-            p = 1 / [1 + exp(−logit(p))]
-        </div>
-        <div class='formula-sub'>当前输入：性别编码={result.sex_code}；logit={result.logit:.4f}；p={result.probability:.4f}</div>
-    </div>
+CUSTOM_CSS = """
+<style>
+#MainMenu, footer {visibility: hidden;}
+.block-container {padding-top: 2.6rem; max-width: 1550px;}
+.main-title-box {
+    background: #3178d4;
+    border-radius: 6px;
+    padding: 18px 24px;
+    margin-bottom: 14px;
+    text-align: center;
+    color: white;
+    font-weight: 800;
+    font-size: 25px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.sub-note {
+    font-size: 14px;
+    color: #4b5563;
+    line-height: 1.7;
+    padding: 8px 2px 18px 2px;
+}
+.input-panel {
+    border: 1px solid #d9dee8;
+    border-radius: 8px;
+    padding: 16px 16px 6px 16px;
+    background: #ffffff;
+    margin-bottom: 14px;
+}
+.result-note {
+    background: #eaf4ff;
+    border-radius: 8px;
+    padding: 15px 16px;
+    color: #075a9c;
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.warning-note {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: #9a3412;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-top: 8px;
+}
+.stButton>button {
+    background: #0d86df;
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    height: 42px;
+    font-weight: 700;
+}
+.stButton>button:hover {background: #0873c5; color:white; border:0;}
+[data-testid="stMetricValue"] {font-size: 2.4rem;}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+st.markdown(
+    '<div class="main-title-box">Clinical Decision Support for Stroke Auxiliary Recognition Based on EEG Power Ratio</div>',
+    unsafe_allow_html=True,
+)
+
+with st.container():
+    st.markdown('<div class="input-panel">', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        age = st.number_input("Age", min_value=18.0, max_value=110.0, value=66.0, step=1.0, format="%.2f")
+    with c2:
+        sex_label = st.selectbox("Sex", options=["Male", "Female"], index=0)
+    with c3:
+        p_tbr = st.number_input("P-TBR", min_value=0.0, max_value=20.0, value=1.705, step=0.01, format="%.3f")
+    with c4:
+        c_dtabr = st.number_input("C-DTABR", min_value=0.0, max_value=20.0, value=1.170, step=0.01, format="%.3f")
+
+    _, mid, _ = st.columns([1.3, 1, 1.3])
+    with mid:
+        start = st.button("Start prediction", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+sex_code = 1 if sex_label == "Female" else 0
+logit, prob = predict(age, sex_code, p_tbr, c_dtabr)
+result_text = "exceeds the stroke auxiliary recognition threshold" if prob >= THRESHOLD else "does not exceed the stroke auxiliary recognition threshold"
+
+with st.expander("Current input", expanded=True):
+    current_input = pd.DataFrame(
+        [{"Age": age, "Sex": sex_label, "Sex code": sex_code, "P-TBR": p_tbr, "C-DTABR": c_dtabr}]
+    )
+    st.dataframe(current_input, hide_index=True, use_container_width=True)
+
+with st.expander("Predict result", expanded=True):
+    st.markdown(
+        f'<div class="result-note">Predict probability segmentation threshold is <b>{THRESHOLD*100:.2f}%</b>.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<h3 style='text-align:center; font-family: Georgia, serif; font-weight:500;'>Probability of stroke status: {prob*100:.2f}%</h3>",
+        unsafe_allow_html=True,
+    )
+    fig, contribution_rows, base_prob, final_prob = make_force_plot(age, sex_code, p_tbr, c_dtabr)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.markdown(
+        f"<div class='result-note'>Model decision: current probability {prob*100:.2f}% {result_text}.</div>",
+        unsafe_allow_html=True,
+    )
+
+with st.expander("Model formula and contribution details", expanded=False):
+    st.markdown(
+        """
+**Fixed Logistic model**
+
+`logit(p) = -2.094 - 0.012 × Age + 0.332 × Sex code + 1.092 × P-TBR + 0.897 × C-DTABR`
+
+`p = 1 / [1 + exp(-logit(p))]`
+
+Sex coding: Male = 0, Female = 1.
+        """
+    )
+    details = pd.DataFrame(
+        [
+            {"Feature": name, "Input value": value, "Logit contribution relative to reference": round(contribution, 4)}
+            for name, value, contribution in contribution_rows
+        ]
+    )
+    st.dataframe(details, hide_index=True, use_container_width=True)
+
+st.markdown(
     """
-
-
-def build_download_record(result: PredictionResult) -> pd.DataFrame:
-    """Create one-row CSV record for download."""
-    return pd.DataFrame(
-        [{
-            "age": result.age,
-            "sex": result.sex_label,
-            "sex_code": result.sex_code,
-            "P_TBR": result.p_tbr,
-            "C_DTABR": result.c_dtabr,
-            "logit": round(result.logit, 6),
-            "probability": round(result.probability, 6),
-            "probability_percent": round(result.probability * 100, 2),
-            "threshold": result.threshold,
-            "classification": result.classification,
-        }]
-    )
-
-
-def inject_css() -> None:
-    st.markdown(
-        """
-        <style>
-        .main .block-container {max-width: 1180px; padding-top: 1.6rem; padding-bottom: 2rem;}
-        h1, h2, h3 {letter-spacing: -0.02em;}
-        .hero {
-            padding: 22px 26px;
-            border-radius: 22px;
-            background: linear-gradient(135deg, #0B3B75 0%, #155EEF 52%, #6C63FF 100%);
-            color: white;
-            box-shadow: 0 18px 50px rgba(21, 94, 239, .20);
-            margin-bottom: 18px;
-        }
-        .hero-title {font-size: 28px; font-weight: 800; margin-bottom: 8px;}
-        .hero-sub {font-size: 15px; opacity: .92; line-height: 1.65;}
-        .metric-card {
-            padding: 18px 20px;
-            border: 1px solid #EAECF0;
-            border-radius: 18px;
-            background: #FFFFFF;
-            box-shadow: 0 10px 24px rgba(16, 24, 40, .06);
-        }
-        .metric-title {font-size: 14px; color: #667085; margin-bottom: 6px;}
-        .metric-value {font-size: 32px; font-weight: 800; color: #101828; margin-bottom: 2px;}
-        .metric-sub {font-size: 13px; color: #667085;}
-        .risk-high {color: #B42318; font-weight: 800;}
-        .risk-low {color: #027A48; font-weight: 800;}
-        .formula-card {
-            border: 1px solid #D0D5DD;
-            border-radius: 18px;
-            padding: 16px 18px;
-            background: #F9FAFB;
-            margin-top: 8px;
-            margin-bottom: 12px;
-        }
-        .formula-title {font-weight: 800; color: #101828; margin-bottom: 8px;}
-        .formula-body {font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; color: #344054; line-height: 1.7;}
-        .formula-sub {font-size: 13px; color: #667085; margin-top: 8px;}
-        .notice {
-            border-left: 4px solid #F79009;
-            background: #FFFAEB;
-            padding: 12px 14px;
-            border-radius: 12px;
-            color: #7A2E0E;
-            font-size: 14px;
-            line-height: 1.7;
-        }
-        .small-note {font-size: 13px; color: #667085; line-height: 1.7;}
-        [data-testid="stMetricValue"] {font-size: 30px;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def main() -> None:
-    st.set_page_config(
-        page_title="EEG卒中辅助识别工具",
-        page_icon="🧠",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-    inject_css()
-
-    st.markdown(
-        """
-        <div class='hero'>
-            <div class='hero-title'>基于脑电功率比特征的卒中辅助识别工具</div>
-            <div class='hero-sub'>
-                本工具基于固定的多变量Logistic回归模型，输入年龄、性别、P-TBR和C-DTABR后，自动计算卒中状态辅助识别概率，
-                并生成个体化变量贡献图。该工具仅用于科研展示和临床辅助参考，不能替代头颅CT/MRI及专科医师诊断。
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.sidebar:
-        st.header("输入患者信息")
-        st.caption("请使用与建模阶段一致的脑电预处理和功率比计算方法。")
-
-        if "example_loaded" not in st.session_state:
-            st.session_state.example_loaded = False
-
-        if st.button("载入论文示例病例", use_container_width=True):
-            st.session_state.age = 74.0
-            st.session_state.sex_label = "女"
-            st.session_state.p_tbr = 7.72
-            st.session_state.c_dtabr = 4.04
-            st.session_state.example_loaded = True
-
-        age = st.number_input("年龄（岁）", min_value=18.0, max_value=110.0, value=st.session_state.get("age", 66.0), step=1.0, key="age")
-        sex_label = st.selectbox("性别", options=["男", "女"], index=1 if st.session_state.get("sex_label", "男") == "女" else 0, key="sex_label")
-        p_tbr = st.number_input("P-TBR：顶区 θ/β 功率比", min_value=0.0, max_value=20.0, value=st.session_state.get("p_tbr", 1.705), step=0.01, format="%.3f", key="p_tbr")
-        c_dtabr = st.number_input("C-DTABR：中央区 δ/(θ+α+β) 功率比", min_value=0.0, max_value=20.0, value=st.session_state.get("c_dtabr", 1.170), step=0.01, format="%.3f", key="c_dtabr")
-
-        st.divider()
-        st.subheader("模型设置")
-        st.write(f"判别阈值：**{THRESHOLD:.4f}**")
-        st.write("性别编码：男=0，女=1")
-        st.caption("若原始R模型的性别参考水平不同，请先修改代码中的 SEX_CODE。")
-
-    result = predict(age, sex_label, p_tbr, c_dtabr)
-    probability_percent = result.probability * 100
-    risk_class = "risk-high" if result.probability >= result.threshold else "risk-low"
-
-    col1, col2, col3 = st.columns([1.0, 1.0, 1.15])
-    with col1:
-        st.markdown(
-            f"""
-            <div class='metric-card'>
-                <div class='metric-title'>预测概率</div>
-                <div class='metric-value'>{probability_percent:.2f}%</div>
-                <div class='metric-sub'>阈值：{result.threshold * 100:.2f}%</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with col2:
-        st.markdown(
-            f"""
-            <div class='metric-card'>
-                <div class='metric-title'>模型判定</div>
-                <div class='metric-value {risk_class}'>{'高于阈值' if result.probability >= result.threshold else '低于阈值'}</div>
-                <div class='metric-sub'>{result.classification}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with col3:
-        st.markdown(make_formula_card(result), unsafe_allow_html=True)
-
-    left, right = st.columns([1.0, 1.15])
-    with left:
-        st.plotly_chart(make_gauge(result.probability, result.threshold), use_container_width=True)
-    with right:
-        st.plotly_chart(make_contribution_plot(result), use_container_width=True)
-
-    st.subheader("当前输入与输出")
-    record = build_download_record(result)
-    st.dataframe(record, use_container_width=True, hide_index=True)
-    st.download_button(
-        label="下载本次预测结果 CSV",
-        data=record.to_csv(index=False).encode("utf-8-sig"),
-        file_name="eeg_stroke_prediction_result.csv",
-        mime="text/csv",
-        use_container_width=False,
-    )
-
-    st.markdown(
-        """
-        <div class='notice'>
-        重要说明：本工具输出的是基于当前模型的“卒中状态辅助识别概率”，不是未来卒中发生风险，也不是影像学诊断结论。
-        模型来自单中心回顾性数据，当前版本适合科研展示、方法复现和内部测试；正式临床使用前需进行独立外部验证和前瞻性评估。
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.expander("查看变量定义与模型来源"):
-        st.markdown(
-            """
-            - **P-TBR**：顶区 theta/beta 功率比，即顶区 θ/β 比值。
-            - **C-DTABR**：中央区 delta/(theta+alpha+beta) 功率比，即中央区 δ/(θ+α+β) 比值。
-            - **模型形式**：多变量Logistic回归。
-            - **预测阈值**：0.6945，来自训练集Youden指数最大化原则。
-            - **变量贡献图**：采用固定参考值下的线性Logit贡献展示，即 β × (X − reference)。没有原始训练集背景分布时，该图不应称为严格意义的SHAP图。
-            """
-        )
-
-
-if __name__ == "__main__":
-    main()
+<div class="warning-note">
+<b>Clinical note:</b> This web tool is intended for research demonstration and clinical auxiliary reference only. 
+It cannot replace head CT/MRI or specialist diagnosis. The force-plot style chart is generated from the fixed Logistic regression coefficients and reference values; strict SHAP analysis requires the original training dataset.
+</div>
+""",
+    unsafe_allow_html=True,
+)

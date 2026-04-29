@@ -1,17 +1,18 @@
 {
-  "model_type": "multivariable_logistic_regression",
-  "outcome": "stroke_status_auxiliary_recognition",
+  "model_name": "EEG power-ratio based stroke auxiliary recognition model",
   "intercept": -2.094,
   "coefficients": {
     "age": -0.012,
-    "sex_code": 0.332,
-    "P_TBR": 1.092,
-    "C_DTABR": 0.897
+    "sex_female": 0.332,
+    "P-TBR": 1.092,
+    "C-DTABR": 0.897
   },
-  "sex_code": {
-    "male": 0,
-    "female": 1
-  },
+  "sex_coding": "male=0, female=1",
   "threshold": 0.6945,
-  "formula": "logit(p) = -2.094 - 0.012*age + 0.332*sex_code + 1.092*P_TBR + 0.897*C_DTABR"
+  "reference_values": {
+    "age": 66.0,
+    "sex_female": 0,
+    "P-TBR": 1.705,
+    "C-DTABR": 1.17
+  }
 }
