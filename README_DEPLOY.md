@@ -1,5 +1,5 @@
-# EEG Stroke Auxiliary Recognition Tool V5.2 Stable
+# EEG Stroke Auxiliary Recognition Tool V5.3 No-Plotly Stable
 
-This version avoids Plotly barmode compatibility issues on Streamlit Cloud.
+This final stable version uses pure HTML/CSS for the force-style chart and does not depend on Plotly.
 
 Main file path: app.py

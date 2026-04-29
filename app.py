@@ -1,6 +1,5 @@
 import math
 import streamlit as st
-import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="EEG Stroke Auxiliary Recognition",
@@ -45,7 +44,125 @@ st.markdown(
     border-radius: 6px;
     padding: 12px 14px;
     font-size: 14px;
-    margin-bottom: 6px;
+    margin-bottom: 10px;
+}
+.force-title {
+    font-family: Georgia, 'Times New Roman', serif;
+    text-align: center;
+    font-size: 25px;
+    font-weight: 700;
+    color: #222;
+    margin: 12px 0 6px 0;
+}
+.force-wrap {
+    position: relative;
+    height: 245px;
+    background: white;
+    border-radius: 6px;
+    margin: 0 8px 10px 8px;
+}
+.axis-line {
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    top: 118px;
+    height: 1px;
+    background: #4b5563;
+}
+.base-line {
+    position: absolute;
+    left: 23%;
+    top: 70px;
+    height: 120px;
+    border-left: 1px dashed #aab4c3;
+}
+.fx-line {
+    position: absolute;
+    left: 62%;
+    top: 70px;
+    height: 120px;
+    border-left: 2px solid #222;
+}
+.base-label {
+    position: absolute;
+    left: 20.2%;
+    top: 55px;
+    color: #7c8797;
+    font-size: 12px;
+    text-align: center;
+}
+.fx-label {
+    position: absolute;
+    left: 60.8%;
+    top: 55px;
+    color: #111;
+    font-size: 12px;
+    text-align: center;
+}
+.higher-lower {
+    position: absolute;
+    right: 6%;
+    top: 52px;
+    font-size: 13px;
+}
+.red-text { color: #ff0a54; }
+.blue-text { color: #1683e8; }
+.bar-zone {
+    position: absolute;
+    left: 12%;
+    right: 10%;
+    top: 107px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+}
+.neg-zone {
+    width: 18%;
+    height: 30px;
+    display: flex;
+    flex-direction: row-reverse;
+}
+.pos-zone {
+    width: 82%;
+    height: 30px;
+    display: flex;
+}
+.red-block {
+    height: 30px;
+    background: #ff0a54;
+    color: white;
+    border-right: 1px solid white;
+    font-size: 12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.blue-block {
+    height: 30px;
+    background: #1683e8;
+    color: white;
+    border-left: 1px solid white;
+    font-size: 12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.tick-label {
+    position:absolute;
+    top:155px;
+    color:#6b7280;
+    font-size:11px;
+}
+.x-title {
+    position:absolute;
+    top:185px;
+    left:46%;
+    color:#7c8797;
+    font-size:12px;
 }
 .decision-line {
     background: #eaf4ff;
@@ -87,112 +204,47 @@ div[data-testid="stSelectbox"] div {
     unsafe_allow_html=True,
 )
 
-def sigmoid(x: float) -> float:
+def sigmoid(x):
     return 1.0 / (1.0 + math.exp(-x))
 
-def add_block(fig, x0, x1, label, color):
-    """Draw one force-style block by shape, avoiding Plotly barmode compatibility issues."""
-    y0, y1 = -0.13, 0.13
-    fig.add_shape(
-        type="rect",
-        x0=x0,
-        x1=x1,
-        y0=y0,
-        y1=y1,
-        line=dict(color="white", width=1.2),
-        fillcolor=color,
-        layer="below"
-    )
-    fig.add_annotation(
-        x=(x0 + x1) / 2,
-        y=0,
-        text=label,
-        showarrow=False,
-        font=dict(size=12, color="white"),
-        align="center"
-    )
+def block_html(label, value, total_pos, total_neg):
+    if value >= 0:
+        width = max(8, abs(value) / max(total_pos, 0.001) * 100)
+        return f"<div class='red-block' style='width:{width:.1f}%;'>{label} = {value:+.3f}</div>"
+    width = max(8, abs(value) / max(total_neg, 0.001) * 100)
+    return f"<div class='blue-block' style='width:{width:.1f}%;'>{label} = {value:+.3f}</div>"
 
-def make_force_plot(contribs, logit_value, prob_value):
+def make_force_html(prob, logit, contribs):
     contribs = sorted(contribs, key=lambda x: abs(x[1]), reverse=True)
+    pos = [(k,v) for k,v in contribs if v >= 0]
+    neg = [(k,v) for k,v in contribs if v < 0]
+    total_pos = sum(v for _,v in pos)
+    total_neg = sum(abs(v) for _,v in neg)
 
-    fig = go.Figure()
+    neg_blocks = "".join(block_html(k, v, total_pos, total_neg) for k,v in neg)
+    pos_blocks = "".join(block_html(k, v, total_pos, total_neg) for k,v in pos)
 
-    pos_cursor = 0.0
-    neg_cursor = 0.0
-
-    for label, value in contribs:
-        if value >= 0:
-            x0 = pos_cursor
-            x1 = pos_cursor + value
-            pos_cursor = x1
-            add_block(fig, x0, x1, f"{label} = {value:+.3f}", "#ff0a54")
-        else:
-            x0 = neg_cursor + value
-            x1 = neg_cursor
-            neg_cursor = x0
-            add_block(fig, x0, x1, f"{label} = {value:+.3f}", "#1683e8")
-
-    xmin = min(neg_cursor, -0.5) - 0.25
-    xmax = max(pos_cursor, logit_value, 0.5) + 0.35
-
-    fig.add_vline(x=0, line_width=1.1, line_dash="dot", line_color="#aab4c3")
-    fig.add_vline(x=logit_value, line_width=1.8, line_color="#222222")
-
-    fig.add_annotation(
-        x=0,
-        y=0.30,
-        text="base value<br>0.00",
-        showarrow=False,
-        font=dict(size=12, color="#7c8797"),
-        align="center",
-    )
-    fig.add_annotation(
-        x=logit_value,
-        y=0.30,
-        text=f"f(x)<br>{logit_value:.2f}",
-        showarrow=False,
-        font=dict(size=12, color="#111111"),
-        align="center",
-    )
-    fig.add_annotation(
-        x=xmax,
-        y=0.38,
-        text="<span style='color:#ff0a54'>higher</span>  ↔  <span style='color:#1683e8'>lower</span>",
-        showarrow=False,
-        font=dict(size=13),
-        align="right",
-    )
-
-    fig.update_layout(
-        height=260,
-        margin=dict(l=50, r=40, t=30, b=36),
-        xaxis=dict(
-            title="Logit contribution",
-            range=[xmin, xmax],
-            zeroline=False,
-            showgrid=False,
-            tickfont=dict(size=11, color="#6b7280"),
-            titlefont=dict(size=12, color="#7c8797"),
-        ),
-        yaxis=dict(
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            range=[-0.32, 0.45],
-        ),
-        showlegend=False,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        title=dict(
-            text=f"Probability of stroke status: {prob_value*100:.2f}%",
-            x=0.5,
-            y=0.98,
-            xanchor="center",
-            yanchor="top",
-            font=dict(size=22, family="Georgia, Times New Roman, serif", color="#222"),
-        ),
-    )
-    return fig
+    return f"""
+<div class="force-title">Probability of stroke status: {prob*100:.2f}%</div>
+<div class="force-wrap">
+  <div class="axis-line"></div>
+  <div class="base-line"></div>
+  <div class="fx-line"></div>
+  <div class="base-label">base value<br>0.00</div>
+  <div class="fx-label">f(x)<br>{logit:.2f}</div>
+  <div class="higher-lower"><span class="red-text">higher</span> ↔ <span class="blue-text">lower</span></div>
+  <div class="bar-zone">
+    <div class="neg-zone">{neg_blocks}</div>
+    <div class="pos-zone">{pos_blocks}</div>
+  </div>
+  <div class="tick-label" style="left:10%;">-1</div>
+  <div class="tick-label" style="left:23%;">0</div>
+  <div class="tick-label" style="left:41%;">1</div>
+  <div class="tick-label" style="left:60%;">2</div>
+  <div class="tick-label" style="left:78%;">3</div>
+  <div class="x-title">Logit contribution</div>
+</div>
+"""
 
 st.markdown(
     """
@@ -249,8 +301,7 @@ with st.expander("Predict result", expanded=True):
         ("Age", B_AGE * age),
         ("Sex", B_SEX * sex_code),
     ]
-    fig = make_force_plot(contrib_pairs, logit, prob)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.markdown(make_force_html(prob, logit, contrib_pairs), unsafe_allow_html=True)
 
     if prob >= THRESHOLD:
         decision = "Model decision: current probability exceeds the stroke auxiliary recognition threshold."
