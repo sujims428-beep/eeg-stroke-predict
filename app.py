@@ -175,7 +175,7 @@ def make_force_plot(contribs, logit_value, prob_value):
     )
 
     fig.update_layout(
-        barmode="overlay",
+        barmode="relative",
         height=260,
         margin=dict(l=50, r=40, t=30, b=36),
         xaxis=dict(
