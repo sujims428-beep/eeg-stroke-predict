@@ -1,5 +1,5 @@
-# EEG Stroke Auxiliary Recognition Tool V5
+# EEG Stroke Auxiliary Recognition Tool V5.2 Stable
 
-Upload these files to the GitHub repository root and deploy with Streamlit Community Cloud.
+This version avoids Plotly barmode compatibility issues on Streamlit Cloud.
 
 Main file path: app.py

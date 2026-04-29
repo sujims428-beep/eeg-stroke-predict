@@ -90,68 +90,57 @@ div[data-testid="stSelectbox"] div {
 def sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
+def add_block(fig, x0, x1, label, color):
+    """Draw one force-style block by shape, avoiding Plotly barmode compatibility issues."""
+    y0, y1 = -0.13, 0.13
+    fig.add_shape(
+        type="rect",
+        x0=x0,
+        x1=x1,
+        y0=y0,
+        y1=y1,
+        line=dict(color="white", width=1.2),
+        fillcolor=color,
+        layer="below"
+    )
+    fig.add_annotation(
+        x=(x0 + x1) / 2,
+        y=0,
+        text=label,
+        showarrow=False,
+        font=dict(size=12, color="white"),
+        align="center"
+    )
+
 def make_force_plot(contribs, logit_value, prob_value):
-    """
-    Thin force-style chart:
-    - red: contribution increasing stroke probability
-    - blue: contribution decreasing stroke probability
-    - variables sorted by absolute contribution
-    """
     contribs = sorted(contribs, key=lambda x: abs(x[1]), reverse=True)
-    positive = [(k, v) for k, v in contribs if v >= 0]
-    negative = [(k, v) for k, v in contribs if v < 0]
 
     fig = go.Figure()
-    baseline = 0.0
-    pos_start = baseline
-    neg_start = baseline
-    y = 0
 
-    for label, value in positive:
-        fig.add_trace(
-            go.Bar(
-                x=[value],
-                y=[y],
-                base=[pos_start],
-                orientation="h",
-                width=0.28,
-                marker=dict(color="#ff0a54", line=dict(color="white", width=1.4)),
-                text=[f"{label} = {value:+.3f}"],
-                textposition="inside",
-                insidetextanchor="middle",
-                hovertemplate=f"{label}<br>Logit contribution: {value:+.4f}<extra></extra>",
-                name=label,
-            )
-        )
-        pos_start += value
+    pos_cursor = 0.0
+    neg_cursor = 0.0
 
-    for label, value in negative:
-        fig.add_trace(
-            go.Bar(
-                x=[value],
-                y=[y],
-                base=[neg_start],
-                orientation="h",
-                width=0.28,
-                marker=dict(color="#1683e8", line=dict(color="white", width=1.4)),
-                text=[f"{label} = {value:+.3f}"],
-                textposition="inside",
-                insidetextanchor="middle",
-                hovertemplate=f"{label}<br>Logit contribution: {value:+.4f}<extra></extra>",
-                name=label,
-            )
-        )
-        neg_start += value
+    for label, value in contribs:
+        if value >= 0:
+            x0 = pos_cursor
+            x1 = pos_cursor + value
+            pos_cursor = x1
+            add_block(fig, x0, x1, f"{label} = {value:+.3f}", "#ff0a54")
+        else:
+            x0 = neg_cursor + value
+            x1 = neg_cursor
+            neg_cursor = x0
+            add_block(fig, x0, x1, f"{label} = {value:+.3f}", "#1683e8")
 
-    xmin = min(neg_start, -0.5) - 0.25
-    xmax = max(pos_start, logit_value, 0.5) + 0.35
+    xmin = min(neg_cursor, -0.5) - 0.25
+    xmax = max(pos_cursor, logit_value, 0.5) + 0.35
 
-    fig.add_vline(x=baseline, line_width=1.1, line_dash="dot", line_color="#aab4c3")
+    fig.add_vline(x=0, line_width=1.1, line_dash="dot", line_color="#aab4c3")
     fig.add_vline(x=logit_value, line_width=1.8, line_color="#222222")
 
     fig.add_annotation(
-        x=baseline,
-        y=0.31,
+        x=0,
+        y=0.30,
         text="base value<br>0.00",
         showarrow=False,
         font=dict(size=12, color="#7c8797"),
@@ -159,7 +148,7 @@ def make_force_plot(contribs, logit_value, prob_value):
     )
     fig.add_annotation(
         x=logit_value,
-        y=0.31,
+        y=0.30,
         text=f"f(x)<br>{logit_value:.2f}",
         showarrow=False,
         font=dict(size=12, color="#111111"),
@@ -167,7 +156,7 @@ def make_force_plot(contribs, logit_value, prob_value):
     )
     fig.add_annotation(
         x=xmax,
-        y=0.42,
+        y=0.38,
         text="<span style='color:#ff0a54'>higher</span>  ↔  <span style='color:#1683e8'>lower</span>",
         showarrow=False,
         font=dict(size=13),
@@ -175,7 +164,6 @@ def make_force_plot(contribs, logit_value, prob_value):
     )
 
     fig.update_layout(
-        barmode="relative",
         height=260,
         margin=dict(l=50, r=40, t=30, b=36),
         xaxis=dict(
@@ -189,7 +177,8 @@ def make_force_plot(contribs, logit_value, prob_value):
         yaxis=dict(
             showticklabels=False,
             showgrid=False,
-            range=[-0.35, 0.48],
+            zeroline=False,
+            range=[-0.32, 0.45],
         ),
         showlegend=False,
         plot_bgcolor="white",
