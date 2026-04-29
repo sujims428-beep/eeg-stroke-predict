@@ -5,6 +5,7 @@
   "ptbr": 1.092,
   "cdtabr": 0.897,
   "threshold": 0.6945,
+  "threshold_percent": 69.45,
   "sex_code": {
     "Male": 0,
     "Female": 1

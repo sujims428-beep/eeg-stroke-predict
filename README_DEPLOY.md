@@ -1,16 +1,5 @@
-# EEG Stroke Auxiliary Recognition Tool
+# EEG Stroke Auxiliary Recognition Tool V5
 
-## Deployment
+Upload these files to the GitHub repository root and deploy with Streamlit Community Cloud.
 
-Upload the following files to the root directory of a GitHub repository:
-
-- app.py
-- requirements.txt
-- model_parameters.json
-- README_DEPLOY.md
-
-Then deploy on Streamlit Community Cloud:
-
-- Repository: your GitHub repository
-- Branch: main
-- Main file path: app.py
+Main file path: app.py
